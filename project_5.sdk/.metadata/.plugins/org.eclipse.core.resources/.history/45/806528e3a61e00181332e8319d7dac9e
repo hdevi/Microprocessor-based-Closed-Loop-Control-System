@@ -1,0 +1,429 @@
+/*
+ * Threads.c
+
+ *
+ *  Created on: 03-Mar-2018
+ *      Author: HIMAN
+ */
+
+
+//Master task used to initialize Semaphores, Tasks and message Queues
+void masterTask (void *pvParameters)
+{
+  //Create Semaphores
+  peripheral_sem = xSemaphoreCreateBinary();
+  if (peripheral_sem == NULL)
+    {
+      xil_printf ("Insufficient Heap Memory\n");
+      exit (1);
+    }
+
+  xil_printf("Semaphore Created\n");
+
+  //Create Message Queues
+  xdisplayQueue = xQueueCreate(1, sizeof(Parameters_t));
+  /* Check the queue was created. */
+  configASSERT(xdisplayQueue);
+
+  //Create Message Queues
+  xoutputQueue = xQueueCreate(1, sizeof(Parameters_t));
+  /* Check the queue was created. */
+  configASSERT(xoutputQueue);
+
+  //Create Message Queues
+  xpidQueue = xQueueCreate(1, sizeof(Parameters_t));
+  /* Check the queue was created. */
+  configASSERT(xpidQueue);
+
+
+
+  xTaskCreate (readParametersTask,
+	       (const char *) "Read",
+	       2048,
+	       NULL,
+	       tskIDLE_PRIORITY + 3,
+	       &xreadParameter);
+
+  xTaskCreate (displayTask,
+	       (const char *) "Display",
+	       2048,
+	       NULL,
+	       tskIDLE_PRIORITY + 3,
+	       &xdisplay);
+
+  xTaskCreate (PIDControlTask,
+	       (const char *) "PID",
+	       2048,
+	       NULL,
+	       tskIDLE_PRIORITY + 3,
+	       &xpid);
+
+  XWdtTb_Start(&WTD_inst);
+
+  while(1)
+    {
+      if(readParametersTaskflag && displayTaskflag && PIDControlTaskflag)
+	sys_running = 1;
+      else
+	sys_running = 0;
+
+      if(Forcecrash)
+	sys_running = 0;
+
+      readParametersTaskflag = 0;
+      displayTaskflag = 0;
+      PIDControlTaskflag = 0;
+    }
+
+  for(;;);
+
+}
+
+//Task to display the output on the OLED_rgb display
+void displayTask(void* pvParameters)
+{
+  Parameters_t display_parameters,temp_parameters,output_parameter;
+  while(1)
+    {
+      displayTaskflag = 1;
+      xil_printf("DISPL DRPM:%d\n",display_parameters.drpm);
+      //Receives parameters from xdisplayQueue
+      xQueueReceive(xdisplayQueue,&display_parameters,100);
+      //Receives parameters from xoutputQueue
+      xQueueReceive(xoutputQueue,&output_parameter,100);
+      if((display_parameters.conv != temp_parameters.conv))
+	{
+	  OLEDrgb_SetFontColor(&pmodOLEDrgb_inst,OLEDrgb_BuildRGB(70,130,180));
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 3, 0);
+	  OLEDrgb_PutString(&pmodOLEDrgb_inst, "   ");
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 3, 0);
+	  PMDIO_putnum(&pmodOLEDrgb_inst, display_parameters.conv, 10);
+	}
+
+      if((display_parameters.duty_cycle != temp_parameters.duty_cycle))
+	{
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 9, 0);
+	  OLEDrgb_PutString(&pmodOLEDrgb_inst, "   ");
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 9, 0);
+	  PMDIO_putnum(&pmodOLEDrgb_inst, display_parameters.duty_cycle, 10);
+	}
+      if((display_parameters.kp != temp_parameters.kp))
+	{
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 0, 4);
+	  OLEDrgb_PutString(&pmodOLEDrgb_inst, "   ");
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 0, 4);
+	  PMDIO_putnum(&pmodOLEDrgb_inst, display_parameters.kp, 10);
+	}
+
+      if((display_parameters.ki != temp_parameters.ki))
+	{
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 4, 4);
+	  OLEDrgb_PutString(&pmodOLEDrgb_inst, "   ");
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 4, 4);
+	  PMDIO_putnum(&pmodOLEDrgb_inst, display_parameters.ki, 10);
+	}
+
+      if((display_parameters.kd != temp_parameters.kd))
+	{
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 8, 4);
+	  OLEDrgb_PutString(&pmodOLEDrgb_inst, "   ");
+	  OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 8, 4);
+	  PMDIO_putnum(&pmodOLEDrgb_inst, display_parameters.kd, 10);
+	}
+
+      OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 5, 5);
+      OLEDrgb_PutString(&pmodOLEDrgb_inst, "         ");
+      OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 5, 5);
+      PMDIO_putnum(&pmodOLEDrgb_inst,display_parameters.drpm, 10);
+
+      OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 5, 7);
+      OLEDrgb_PutString(&pmodOLEDrgb_inst, "      ");
+      OLEDrgb_SetCursor(&pmodOLEDrgb_inst, 5, 7);
+      PMDIO_putnum(&pmodOLEDrgb_inst,output_parameter.arpm, 10);
+
+      temp_parameters = display_parameters;
+    }
+}
+
+//Reads parameters when semaphores is realized or else reads rotary count
+void readParametersTask(void* pvParameters)
+{
+  Parameters_t motor_input_parameters = {0,0,0,0,0,0,0,0};
+  uint16_t RotaryCnt,OldRotaryCnt = 0xFFFF;
+  bool RotaryNoNeg = false;
+  pmodENC_clear_count(&pmodENC_inst);
+
+  while(1)
+    {
+      readParametersTaskflag = 1;
+      //Reads the buttons or switches when Semaphore is realized or else reads Rotary cnt
+      if(xSemaphoreTake(peripheral_sem,100))
+	{
+	  xil_printf("Semaphore Taken\n");
+	  if(isbutton_pressed(BTNC))
+	    {
+	      xil_printf("EXIT\n");
+	      motor_input_parameters.kp = 0;
+	      motor_input_parameters.kd = 0;
+	      motor_input_parameters.ki = 0;
+	      motor_input_parameters.duty_cycle = 0;
+	      pmodENC_clear_count(&pmodENC_inst);
+	      RotaryCnt = 0;
+	      PWM_SetParams(&AXITimerInst1, 4*10^3 ,0);
+	    }
+	  switches = GET_SWITCHES();
+	  MOTOR_MAGNITUDE = (switches & SWITCHES_1_0);
+	  PID_SELECT = (switches & SWITCHES_3_2) >> 2;
+	  PID_MAGNITUDE = (switches & SWITCHES_5_4)>> 4;
+	  CRASH = (switches & SWITCHES_15);
+	  xil_printf("CRASH %d | %d | %d\n",CRASH,switches,SWITCHES_15);
+
+	  //switch to select the motor magnitude
+	  switch(MOTOR_MAGNITUDE)
+	  {
+
+	    case INCDEC_BY_1:
+	      pmodENC_init(&pmodENC_inst, SPEED_BY_1, RotaryNoNeg);
+	      break;
+	    case INCDEC_BY_5:
+	      pmodENC_init(&pmodENC_inst, SPEED_BY_5, RotaryNoNeg);
+	      break;
+	    case INCDEC_BY_10:
+	      pmodENC_init(&pmodENC_inst, SPEED_BY_10, RotaryNoNeg);
+	      break;
+	  }
+
+	  //Switch case to select the constant
+	  switch(PID_SELECT)
+	  {
+
+	    case SELECT_KP:
+
+	      SET_LED(KP_SETLED);
+	      switch(PID_MAGNITUDE)
+	      {
+		case INCDEC_BY_1:
+		  if(isbutton_pressed(BTNU))
+		    motor_input_parameters.kp += 1;
+		  if(isbutton_pressed(BTND))
+		    motor_input_parameters.kp -= 1;
+		  break;
+		case INCDEC_BY_5:
+		  if(isbutton_pressed(BTNU))
+		    motor_input_parameters.kp += 5;
+		  if(isbutton_pressed(BTND))
+		    motor_input_parameters.kp -= 5;
+		  break;
+		case INCDEC_BY_10:
+		  if(isbutton_pressed(BTNU))
+		    motor_input_parameters.kp += 10;
+		  if(isbutton_pressed(BTND))
+		    motor_input_parameters.kp -= 10;
+		  break;
+		default:
+		  if(isbutton_pressed(BTNU))
+		    motor_input_parameters.kp += 10;
+		  if(isbutton_pressed(BTND))
+		    motor_input_parameters.kp -= 10;
+		  break;
+	      }
+	      break;
+
+		case SELECT_KI:
+
+		  SET_LED(KI_SETLED);
+		  switch(PID_MAGNITUDE)
+		  {
+		    case INCDEC_BY_1:
+		      if(isbutton_pressed(BTNU))
+			motor_input_parameters.ki += 1;
+		      if(isbutton_pressed(BTND))
+			motor_input_parameters.ki -= 1;
+		      break;
+		    case INCDEC_BY_5:
+		      if(isbutton_pressed(BTNU))
+			motor_input_parameters.ki += 5;
+		      if(isbutton_pressed(BTND))
+			motor_input_parameters.ki -= 5;
+		      break;
+		    case INCDEC_BY_10:
+		      if(isbutton_pressed(BTNU))
+			motor_input_parameters.ki += 10;
+		      if(isbutton_pressed(BTND))
+			motor_input_parameters.ki -= 10;
+		      break;
+		    default:
+		      if(isbutton_pressed(BTNU))
+			motor_input_parameters.ki += 10;
+		      if(isbutton_pressed(BTND))
+			motor_input_parameters.ki -= 10;
+		      break;
+		  }
+		  break;
+
+
+		    case SELECT_KD:
+
+		      SET_LED(KD_SETLED);
+		      switch(PID_MAGNITUDE)
+		      {
+			case INCDEC_BY_1:
+			  if(isbutton_pressed(BTNU))
+			    motor_input_parameters.kd += 1;
+			  if(isbutton_pressed(BTND))
+			    motor_input_parameters.kd -= 1;
+			  break;
+			case INCDEC_BY_5:
+			  if(isbutton_pressed(BTNU))
+			    motor_input_parameters.kd += 5;
+			  if(isbutton_pressed(BTND))
+			    motor_input_parameters.kd -= 5;
+			  break;
+			case INCDEC_BY_10:
+			  if(isbutton_pressed(BTNU))
+			    motor_input_parameters.kd += 10;
+			  if(isbutton_pressed(BTND))
+			    motor_input_parameters.kd -= 10;
+			  break;
+			default:
+			  if(isbutton_pressed(BTNU))
+			    motor_input_parameters.kd += 10;
+			  if(isbutton_pressed(BTND))
+			    motor_input_parameters.kd -= 10;
+			  break;
+		      }
+		      break;
+
+			default:
+
+			  SET_LED(KD_SETLED);
+			  switch(PID_MAGNITUDE)
+			  {
+			    case INCDEC_BY_1:
+			      if(isbutton_pressed(BTNU))
+				motor_input_parameters.kd += 1;
+			      if(isbutton_pressed(BTND))
+				motor_input_parameters.kd -= 1;
+			      break;
+			    case INCDEC_BY_5:
+			      if(isbutton_pressed(BTNU))
+				motor_input_parameters.kd += 5;
+			      if(isbutton_pressed(BTND))
+				motor_input_parameters.kd -= 5;
+			      break;
+			    case INCDEC_BY_10:
+			      if(isbutton_pressed(BTNU))
+				motor_input_parameters.kd += 10;
+			      if(isbutton_pressed(BTND))
+				motor_input_parameters.kd -= 10;
+			      break;
+			    default:
+			      if(isbutton_pressed(BTNU))
+				motor_input_parameters.kd += 10;
+			      if(isbutton_pressed(BTND))
+				motor_input_parameters.kd -= 10;
+			      break;
+			  }
+			  break;
+	  }
+
+	  //Forcecrash when Switch 15 is pressed
+	  if(XGpio_DiscreteRead(&SWITCHBUTTON_inst,GPIO_SW_INPUT_CHANNEL) == 0x8000)
+	    {
+	      Forcecrash = 1;
+	    }
+
+	}
+
+      //Read Rotary Encoder
+      else
+	{
+
+	  if(pmodENC_is_switch_on(&pmodENC_inst) == true)
+	    {
+
+	      XGpio_DiscreteWrite(&MOTORSENSOR_inst,GPIO_DIR_OUTPUT_CHANNEL,GPIO_SET_DIR_CLK);
+	    }
+	  else
+	    {
+
+	      XGpio_DiscreteWrite(&MOTORSENSOR_inst,GPIO_DIR_OUTPUT_CHANNEL,GPIO_SET_DIR_CNTCLK);
+	    }
+
+
+	  pmodENC_read_count(&pmodENC_inst,&RotaryCnt);
+	  motor_input_parameters.conv = RotaryCnt;
+	  if (RotaryCnt != OldRotaryCnt)
+	    {
+	      motor_input_parameters.duty_cycle = ((float)100/255) * motor_input_parameters.conv;
+	      motor_input_parameters.drpm = motor_input_parameters.duty_cycle * 115;
+
+	    }
+
+	  OldRotaryCnt = RotaryCnt;
+
+	}
+      //send the parameters to xdisplayqueue and xpidqueue
+      xQueueSend(xdisplayQueue,&motor_input_parameters,0UL);
+      xQueueSend(xpidQueue,&motor_input_parameters,0UL);
+    }
+}
+
+//Task to implement the PID logic
+static void PIDControlTask(void *pvParameters)
+{
+  Parameters_t pid_parameters;
+  volatile int OldError = 0,NewError = 0,IError = 0, DError = 0,Command = 0;
+  uint32_t duty_cycle;
+  XStatus status;
+  while(1)
+    {
+      PIDControlTaskflag = 1;
+      //receives input from xpidqueue
+      xQueueReceive(xpidQueue,&pid_parameters,100);
+      pid_parameters.arpm = common_parameter.arpm;
+
+      NewError = pid_parameters.drpm - pid_parameters.arpm;
+
+      //Integrating the previous error and current error and limiting the value to 5000
+      IError += NewError;
+      if(IError > 5000)
+	IError = 5000;
+      else if (IError < -5000)
+	IError = -5000;
+      else
+	IError = IError;
+
+      //calculating the differential error
+      DError =  NewError - OldError;
+      //multiplying the constants with the respective errors calculated
+      Command = ((((float)pid_parameters.kp/100) * NewError) + (((float)pid_parameters.ki/100) * IError) + (((float)pid_parameters.kd) * DError));
+
+      Command = (pid_parameters.drpm + Command);
+
+      //limit the value of duty cycle so that it does not exceed the 100%
+      duty_cycle = Command / 115;
+      if(duty_cycle > 100)
+	{
+	  duty_cycle = 100;
+	}
+      else if(duty_cycle < 0)
+	{
+	  duty_cycle = 0;
+	}
+      else
+	duty_cycle = duty_cycle;
+
+      //setting the PWM to the calculated duty cycle at 4kHz
+      status = PWM_SetParams(&AXITimerInst1, 4*10^3 ,duty_cycle);
+      if(status != XST_SUCCESS)
+	{
+	  xil_printf("Failed to set PWM parameters\n");
+	  exit(1);
+	}
+      OldError = NewError;
+      //sSending the nex calculted parameters to the DisplayTask via xoutputqueue
+      xQueueSend(xoutputQueue,&pid_parameters,0UL);
+    }
+}
+

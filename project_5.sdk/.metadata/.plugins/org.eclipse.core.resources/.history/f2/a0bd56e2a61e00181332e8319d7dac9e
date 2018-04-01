@@ -1,0 +1,58 @@
+/*
+ * Handlers.c
+ *
+ *  Created on: 03-Mar-2018
+ *      Author: HIMAN
+ */
+
+//Watchdog Handler
+static void WATCHDOG_Handler(void* pvParameters)
+{
+  if((sys_running == 1 ) && (Forcecrash == 0))
+    XWdtTb_RestartWdt(&WTD_inst);
+  else
+    xil_printf("Oops......SYSTEM CRASHED\n");
+
+  XWdtTb_IntrClear(&WTD_inst);
+}
+
+//Handler called when buttons or switches interrupt occurs, Semaphore is released
+static void PERIPHERAL_Handler(void* pvParameters)
+{
+  xSemaphoreGiveFromISR(peripheral_sem,NULL);
+
+  XGpio_InterruptClear(&SWITCHBUTTON_inst, SWITCHES_ENABLE_MASK);
+}
+
+//handler to take pulse count
+static void PULSE_Handler(void* pvParameters)
+{
+  if(XGpio_DiscreteRead(&MOTORSENSOR_inst,GPIO_SEN_INPUT_CHANNEL) == 1)
+    {
+      common_parameter.count++;
+
+    }
+
+  XGpio_InterruptClear(&MOTORSENSOR_inst, 0xffff );
+}
+
+//Handler to take take count readings after 1 sec
+static void SECONDS_Handler(void* pvParameters)
+{
+  u32		ctlsts2;
+  ctlsts2 = XTmrCtr_GetControlStatusReg(AXI_TIMER_2_BASEADDR, TmrCtrNumber2);
+  ctlsts2 |= XTC_CSR_INT_OCCURED_MASK;
+  XTmrCtr_SetControlStatusReg(AXI_TIMER_2_BASEADDR, TmrCtrNumber2, ctlsts2);
+
+  if(oldcount != common_parameter.count)
+    {
+      common_parameter.arpm = common_parameter.count * 60;
+
+      oldcount = common_parameter.count;
+    }
+
+
+  common_parameter.count = 0;
+
+}
+

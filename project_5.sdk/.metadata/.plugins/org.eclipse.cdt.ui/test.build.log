@@ -1,0 +1,12 @@
+05:38:49 **** Incremental Build of configuration Debug for project test ****
+make all 
+'Building target: test.elf'
+'Invoking: MicroBlaze gcc linker'
+mb-gcc -Wl,-T -Wl,../src/lscript.ld -L../../standalone_bsp_1/microblaze_0/lib -mlittle-endian -mcpu=v10.0 -mxl-soft-mul -Wl,--no-relax -Wl,--gc-sections -o "test.elf"  ./src/helloworld.o ./src/platform.o ./src/pwm_tmrctr.o   -Wl,--start-group,-lxil,-lgcc,-lc,--end-group
+./src/helloworld.o: In function `main':
+H:\Practice\project_5\project_5.sdk\test\Debug/../src/helloworld.c:185: undefined reference to `xil_print'
+collect2.exe: error: ld returned 1 exit status
+make: *** [test.elf] Error 1
+
+05:38:49 Build Finished (took 630ms)
+

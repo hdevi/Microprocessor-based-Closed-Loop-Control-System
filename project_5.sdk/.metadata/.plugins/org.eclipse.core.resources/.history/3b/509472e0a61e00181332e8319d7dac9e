@@ -1,0 +1,155 @@
+/*
+ * Helpers.c
+ *
+ *  Created on: 03-Mar-2018
+ *      Author: HIMAN
+ */
+
+/**************************************************Helper Functions****************************************/
+//This function is used to check if Button is pressed if yes it returns 1 or else it returns 0
+int isbutton_pressed(enum _GPIO_btns btnslct)
+{
+  u8  msk,btns;
+  u32 val;
+  val = XGpio_DiscreteRead(&SWITCHBUTTON_inst,GPIO_BUT_INPUT_CHANNEL);
+  btns = (val & GPIO_ALLBTNS_MASK);
+
+  switch (btnslct)
+  {
+    case BTNR:
+
+      msk = GPIO_BTNR_MASK;
+
+      break;
+    case BTNL:
+
+      msk = GPIO_BTNL_MASK;
+
+      break;
+    case BTND:
+
+      msk = GPIO_BTND_MASK;
+
+      break;
+    case BTNU:
+
+      msk = GPIO_BTNU_MASK;
+
+      break;
+    case BTNC:
+
+      msk = GPIO_BTNC_MASK;
+
+      break;
+
+    default: msk = 0;
+    break;
+
+  }
+  return (msk == btns)? 1 : 0;
+}
+
+//GET_SWITCHES function to read switches
+u16 GET_SWITCHES(void)
+{
+  u16 switches;
+  switches = XGpio_DiscreteRead(&SWITCHBUTTON_inst,GPIO_SW_INPUT_CHANNEL);
+  xil_printf("%x\n",switches);
+  return (u16) switches;
+}
+
+//SET_LED function to write the specific led
+void SET_LED(uint16_t ledval)
+{
+  u32 val;
+  val = ledval & GPIO_LED_MASK;
+  XGpio_DiscreteWrite(&LED_inst,GPIO_LED_OUTPUT_CHANNEL,val);
+}
+
+void PMDIO_putnum(PmodOLEDrgb* InstancePtr, int32_t num, int32_t radix)
+{
+  char  buf[16];
+
+  PMDIO_itoa(num, buf, radix);
+  OLEDrgb_PutString(InstancePtr,buf);
+
+  return;
+}
+
+void PMDIO_puthex(PmodOLEDrgb* InstancePtr, uint32_t num)
+{
+  char  buf[9];
+  int32_t   cnt;
+  char  *ptr;
+  int32_t  digit;
+
+  ptr = buf;
+  for (cnt = 7; cnt >= 0; cnt--) {
+      digit = (num >> (cnt * 4)) & 0xF;
+
+      if (digit <= 9)
+	{
+	  *ptr++ = (char) ('0' + digit);
+	}
+      else
+	{
+	  *ptr++ = (char) ('a' - 10 + digit);
+	}
+  }
+
+  *ptr = (char) 0;
+  OLEDrgb_PutString(InstancePtr,buf);
+
+  return;
+}
+
+void PMDIO_itoa(int32_t value, char *string, int32_t radix)
+{
+  char tmp[33];
+  char *tp = tmp;
+  int32_t i;
+  uint32_t v;
+  int32_t  sign;
+  char *sp;
+
+  if (radix > 36 || radix <= 1)
+    {
+      return;
+    }
+
+  sign = ((10 == radix) && (value < 0));
+  if (sign)
+    {
+      v = -value;
+    }
+  else
+    {
+      v = (uint32_t) value;
+    }
+
+  while (v || tp == tmp)
+    {
+      i = v % radix;
+      v = v / radix;
+      if (i < 10)
+	{
+	  *tp++ = i+'0';
+	}
+      else
+	{
+	  *tp++ = i + 'a' - 10;
+	}
+    }
+  sp = string;
+
+  if (sign)
+    *sp++ = '-';
+
+  while (tp > tmp)
+    *sp++ = *--tp;
+  *sp = 0;
+
+  return;
+}
+
+

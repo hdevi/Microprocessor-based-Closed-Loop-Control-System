@@ -1,0 +1,18 @@
+23:46:00 **** Incremental Build of configuration Debug for project project_21 ****
+make all 
+'Building file: ../src/main.c'
+'Invoking: MicroBlaze gcc compiler'
+mb-gcc -Wall -O0 -g3 -c -fmessage-length=0 -MT"src/main.o" -I../../freertos901_xilinx_bsp_0/microblaze_0/include -mlittle-endian -mcpu=v10.0 -mxl-soft-mul -Wl,--no-relax -ffunction-sections -fdata-sections -MMD -MP -MF"src/main.d" -MT"src/main.o" -o "src/main.o" "../src/main.c"
+'Finished building: ../src/main.c'
+' '
+'Building target: project_21.elf'
+'Invoking: MicroBlaze gcc linker'
+mb-gcc -Wl,-T -Wl,../src/lscript.ld -L../../freertos901_xilinx_bsp_0/microblaze_0/lib -mlittle-endian -mcpu=v10.0 -mxl-soft-mul -Wl,--no-relax -Wl,--gc-sections -o "project_21.elf"  ./src/main.o ./src/platform.o ./src/pwm_tmrctr.o   -Wl,--start-group,-lxil,-lfreertos,-lgcc,-lc,--end-group
+'Finished building target: project_21.elf'
+' '
+'Invoking: MicroBlaze Print Size'
+mb-size project_21.elf  |tee "project_21.elf.size"
+   text	   data	    bss	    dec	    hex	filename
+  74984	   1616	  69248	 145848	  239b8	project_21.elf
+'Finished building: project_21.elf.size'
+' '
